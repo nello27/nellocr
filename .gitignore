@@ -1,0 +1,37 @@
+# Entorno virtual de Python
+.venv/
+__pycache__/
+*.pyc
+
+# Pesos del modelo y checkpoints (binarios pesados, no van en git)
+# Se regeneran corriendo el fine-tuning con los scripts del repo.
+output/
+output_xfund_no_comercial/
+
+# Dataset generado (imágenes + labels) — reproducible con generar_dataset*.py
+# No se versiona porque son miles de archivos de imagen pequeños.
+dataset/images/
+dataset/train.txt
+dataset/val.txt
+
+# Dataset externo XFUND-ES (licencia CC BY-NC-SA 4.0, no redistribuir)
+xfund_es_sample/
+
+# Imágenes de prueba con datos personales reales
+imagenes_crudas/
+
+# Resultados de ejecución (JSON de salida de OCR, regenerables)
+resultados/
+resultados_*/
+
+# Carpeta de salida de herramientas de etiquetado
+etiquetado_salida/
+
+# Configuración local del asistente / sesión
+.claude/
+
+# Sistema operativo / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
