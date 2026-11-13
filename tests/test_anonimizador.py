@@ -239,6 +239,22 @@ def test_referencia_con_nombre_y_cargo_en_la_misma_linea():
     assert conteo["nombre_referencia"] == 1
 
 
+def test_nombre_con_espacio_perdido_por_el_ocr():
+    lineas = [
+        _linea("FELIPESAENZ", 38, 75, 211, 527),
+        _linea("WEB DESIGNER & MARKETING", 86, 100, 213, 453),
+    ]
+    texto, conteo = anonimizar_lineas(lineas, alto_imagen=825)
+    assert texto.split("\n") == ["[NOMBRE]", "WEB DESIGNER & MARKETING"]
+    assert conteo["nombre"] == 1
+
+
+def test_titulo_de_una_palabra_no_se_toma_por_nombre_fusionado():
+    for titulo in ["CURRICULUM", "EXPERIENCIA", "Perfil"]:
+        texto, conteo = anonimizar_lineas([_linea(titulo, 38, 75)], alto_imagen=825)
+        assert texto == titulo and conteo["nombre"] == 0, titulo
+
+
 def test_correo_sin_arroba_bajo_etiqueta_mail():
     # El OCR leyó la "@" como "e": "holaesitioincreible.com"
     lineas = [

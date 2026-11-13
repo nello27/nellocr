@@ -127,6 +127,8 @@ _ZONA_SUPERIOR = 0.35   # fracción superior de la página donde se busca el nom
 _TOLERANCIA_ALTURA = 0.8  # una línea cuenta como "del tamaño del nombre" si
                           # mide al menos esto respecto a la más grande
 
+_LARGO_MIN_NOMBRE_FUSIONADO = 9  # letras de una palabra que puede ser nombre y apellido pegados
+
 _VARIANTES = {"a": "aáàäâ", "e": "eéèëê", "i": "iíìïî", "o": "oóòöô",
               "u": "uúùüû", "n": "nñ"}
 
@@ -257,7 +259,15 @@ def detectar_lineas_nombre(lineas, alto_imagen):
     mayor = max(alto for _, alto in candidatas)
     elegidas = [i for i, alto in candidatas if alto >= mayor * _TOLERANCIA_ALTURA]
     palabras = sum(len(lineas[i]["texto"].split()) for i in elegidas)
-    return elegidas if 2 <= palabras <= 6 else []
+    if 2 <= palabras <= 6:
+        return elegidas
+    # El OCR a veces pierde el espacio entre nombre y apellido ("FELIPESAENZ"): se
+    # acepta una sola palabra larga, en mayúsculas y de la letra más grande.
+    if len(elegidas) == 1:
+        unica = lineas[elegidas[0]]["texto"].strip()
+        if len(unica) >= _LARGO_MIN_NOMBRE_FUSIONADO and unica.isupper():
+            return elegidas
+    return []
 
 
 # ---------------------------------------------------------------------------
