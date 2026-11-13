@@ -118,6 +118,25 @@ python generar_dataset_tecnico.py
 Este script **append-ea** a `dataset/train.txt`/`val.txt` existentes (no los
 sobreescribe), por lo que el orden de ejecución importa si se parte de cero.
 
+### 3.2b `generar_dataset_multiarea.py` — lote multi-área
+Generaliza el modelo a hojas de vida de **cualquier área profesional** (no solo
+tecnología) y refuerza los patrones que seguían fallando: separador `|`,
+confusión `I`/`l`/`1`, dígitos, porcentajes y viñetas (`•`, `·`). También
+**append-ea**.
+
+```powershell
+python generar_dataset_multiarea.py
+```
+
+**Dataset final (sin datos personales reales):** los tres scripts, en ese
+orden y con semilla fija, producen **1.302 líneas de entrenamiento y 228 de
+validación** (322+408+572 y 56+72+100). Todos los datos de contacto que
+aparecen en las líneas sintéticas son ficticios (`nombre.apellido@correo.com`,
+`310 123 4567`, etc.). Para regenerarlo desde cero hay que borrar
+`dataset/images`, `dataset/train.txt` y `dataset/val.txt`, **crear**
+`dataset/images/train` y `dataset/images/val` (el script base no crea las
+carpetas) y ejecutar los tres scripts en orden.
+
 ### 3.3 (Descartado) `importar_xfund_es.py` — datos reales de XFUND-ES
 Se probó añadir ~3.077 líneas reales del dataset público XFUND-ES (formularios
 españoles escaneados) para ganar robustez a ruido real. **Se descartó** porque
@@ -187,6 +206,7 @@ Documentados en orden cronológico, porque cada uno bloqueaba al siguiente:
 | 4 | `FileNotFoundError` al instalar el plugin (`repo_manager\repos` no existe) | Bug del instalador: no crea el directorio padre si no existe | Crear manualmente `mkdir .venv\...\repo_manager\repos` antes de instalar |
 | 5 | `FileNotFoundError: ...PaddleOCR_api\configs\latin_PP-OCRv5_mobile_rec.yaml` | Bug de empaquetado: PaddleX 3.3.13 no incluye esa carpeta de configs nativas en el wheel de pip | Copiar manualmente el `.yml` nativo desde el repo clonado: `repo_manager/repos/PaddleOCR/configs/rec/PP-OCRv5/multi_language/latin_PP-OCRv5_mobile_rec.yml` → `paddlex/repo_apis/PaddleOCR_api/configs/latin_PP-OCRv5_mobile_rec.yaml` |
 | 6 | `UnicodeDecodeError: 'charmap' codec can't decode byte...` a mitad de la descarga del checkpoint preentrenado | PaddleX decodifica la salida del subproceso de entrenamiento con la codificación ANSI de Windows (cp1252), pero la barra de progreso (`tqdm`) emite UTF-8 | `$env:PYTHONUTF8="1"` antes de entrenar |
+| 8 | `UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe0` al lanzar el entrenamiento desde Git Bash | Un subproceso de Windows imprime un mensaje en español (`INFORMACIÓN: no se pudo encontrar ningún archivo...`) con la página de códigos de la consola, y PaddleX lo decodifica como UTF-8 | Lanzar desde PowerShell con la consola en UTF-8: `chcp 65001; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8` además de `PYTHONUTF8=1` |
 | 7 | `ValueError: all input arrays must have the same shape` al evaluar | **Bug real de PaddleX**: fuerza el mismo `batch_size` en entrenamiento y evaluación, pero el preprocesamiento de evaluación (`resize_norm_img_chinese`) ajusta el ancho de cada imagen según su propio aspect ratio — con líneas de texto de longitud muy variable, el `collate_fn` no puede apilar tensores de ancho distinto | Parche de una línea en `paddlex/repo_apis/PaddleOCR_api/text_rec/config.py`, método `update_batch_size`: quitar la línea que fuerza `Eval.loader.batch_size_per_card` al mismo valor que train (el yaml nativo ya pedía `batch_size_per_card: 1` para eval, con razón) |
 
 > Los problemas #1, #2, #6 y #7 son bugs/incompatibilidades reales del
@@ -204,6 +224,16 @@ Documentados en orden cronológico, porque cada uno bloqueaba al siguiente:
 | 2 | Sintético + XFUND-ES (2.938 líneas) | 0.00015 | acc 0.862 en época 16, **estable, sin divergencia** durante las 20 épocas |
 | 3 | + lote técnico (refuerzo `\|`/SQL/dígitos) (3.346 líneas) | 0.00015 | acc 0.861 en época 2, corrige el bug del `\|` y la mayoría de siglas técnicas |
 | 4 (comercial) | Solo sintético propio, sin XFUND (730 líneas) | 0.00015 | acc 0.929 en época 4 — mejor resultado, dataset más chico y enfocado converge mejor |
+| 5 | Base + técnico + multi-área (1.302 train / 228 val) | 0.00015 | acc 0.907 en época 4, norm_edit_dis 0.9964; sin mejora en las épocas 5–20 |
+| 6 (**actual**) | Igual que el 5, regenerado con datos de contacto 100% ficticios | 0.00015 | acc **0.877** en época 4, norm_edit_dis 0.9957; sin mejora en las épocas 5–20 |
+
+> Los intentos 5 y 6 no son comparables en sentido estricto: el conjunto de
+> validación cambió (la línea de contacto ficticia reemplazó a una real). La
+> diferencia de ~3 puntos equivale a unas 7 de las 228 líneas de validación y
+> está dentro de la variación normal entre entrenamientos; la distancia de
+> edición casi no cambió. En ambos, la mejor época es la 4 y las 16 siguientes
+> no mejoran, lo que sugiere que bastarían menos épocas. El intento 6 es el que
+> se publica porque su dataset no contiene datos personales.
 
 **Lección clave:** el `learning_rate` por defecto del yaml oficial (0.001) es
 demasiado alto para un dataset de fine-tuning pequeño (cientos/miles de
@@ -243,8 +273,8 @@ pase `text_recognition_model_dir` — si se omite, PaddleOCR asume el modelo
 1. `python -m venv .venv` + instalar dependencias (sección 1.2)
 2. `python -m paddlex --install PaddleOCR -y` (plugin de entrenamiento, sección 1.4)
 3. Si aparece el problema #5: copiar el `.yml` nativo manualmente (sección 5)
-4. `python generar_dataset.py` y `python generar_dataset_tecnico.py`
+4. Crear `dataset/images/train` y `dataset/images/val`, y ejecutar `generar_dataset.py`, `generar_dataset_tecnico.py` y `generar_dataset_multiarea.py` (en ese orden)
 5. Extraer `dict.txt` desde el modelo oficial (sección 2)
 6. `python main.py -c configs\latin_rec_finetune.yaml -o Global.mode=check_dataset`
-7. Con las 3 variables de entorno activas: `python main.py -c configs\latin_rec_finetune.yaml -o Global.mode=train`
+7. Con las 3 variables de entorno activas (desde PowerShell con la consola en UTF-8, problema #8): `python main.py -c configs\latin_rec_finetune.yaml -o Global.mode=train`
 8. Verificar `output/best_accuracy/inference/` y probar con un script como `prueba_modelo_entrenado.py`
