@@ -47,6 +47,8 @@ generar_dataset_tecnico.py    # refuerza separadores "|", siglas técnicas y dí
 main.py                       # punto de entrada de entrenamiento (wrapper de PaddleX Engine)
 configs/                      # configuración de fine-tuning (hiperparámetros)
 api_ocr.py                    # API REST (FastAPI) que sirve el modelo entrenado
+anonimizador.py               # anonimización de datos personales (correo, teléfono, dirección, nombres)
+tests/                        # pruebas unitarias del anonimizador (datos ficticios)
 prueba_ocr.py                 # script de prueba con el modelo base (sin fine-tuning)
 prueba_modelo_entrenado.py    # script de prueba con el modelo fine-tuneado
 importar_xfund_es.py          # (opcional) importa datos reales de XFUND-ES — ver nota de licencia abajo
@@ -78,6 +80,53 @@ python prueba_modelo_entrenado.py
 # 5. Servir como API
 uvicorn api_ocr:app --host 0.0.0.0 --port 8000
 ```
+
+## Endpoints de la API
+
+Documentación interactiva en `http://localhost:8000/docs`.
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/health` | Estado del servicio |
+| POST | `/ocr` | Devuelve cada línea reconocida con su caja y confianza |
+| POST | `/ocr/texto` | Devuelve todo el texto en una sola variable, con anonimización opcional |
+
+### `POST /ocr/texto`
+
+Parámetros: `file` (imagen, multipart) y `anonimizar` (query, `true` por defecto).
+
+```bash
+curl -X POST "http://localhost:8000/ocr/texto?anonimizar=true" -F "file=@cv.png"
+```
+
+```json
+{
+  "archivo": "cv.png",
+  "anonimizado": true,
+  "texto": "[NOMBRE]\nIngeniera de Software\nTel: [TELEFONO]\n[EMAIL]\n...",
+  "datos_anonimizados": {"email": 1, "telefono": 1, "direccion": 1, "nombre": 1, "nombre_referencia": 2}
+}
+```
+
+Con `anonimizar=false` se devuelve el texto original y no aparece `datos_anonimizados`.
+
+**Qué se enmascara** (`anonimizador.py`, basado en reglas, sin servicios externos):
+
+| Token | Dato |
+|---|---|
+| `[EMAIL]` | Correos, incluso con errores de OCR (espacios, coma por punto, "@" perdida bajo una etiqueta "Mail:") |
+| `[TELEFONO]` | Teléfonos en distintos formatos; no confunde fechas, años ni cifras |
+| `[DIRECCION]` | Direcciones y líneas con etiqueta "Dirección:" / "Residencia:" |
+| `[NOMBRE]` | Nombre del candidato (por tamaño de letra en la parte superior) y sus menciones posteriores, y nombres de personas citadas como referencias laborales |
+
+Los nombres de empresas y los cargos **no** se enmascaran, por ser información pública.
+La respuesta solo incluye conteos por tipo, nunca los valores originales.
+
+**Límites:** no cubre otros nombres de terceros fuera de la sección de referencias,
+números de documento, usuarios de redes sociales ni URLs. Es una ayuda, no una
+garantía: revisa el resultado antes de compartirlo.
+
+Pruebas (datos ficticios): `python tests/test_anonimizador.py`
 
 ## Nota sobre licenciamiento de datos
 
