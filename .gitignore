@@ -35,3 +35,6 @@ etiquetado_salida/
 Thumbs.db
 .vscode/
 .idea/
+
+# Material de presentación (guion de video)
+presentacion/
