@@ -48,11 +48,13 @@ main.py                       # punto de entrada de entrenamiento (wrapper de Pa
 configs/                      # configuración de fine-tuning (hiperparámetros)
 api_ocr.py                    # API REST (FastAPI) que sirve el modelo entrenado
 anonimizador.py               # anonimización de datos personales (correo, teléfono, dirección, nombres)
-tests/                        # pruebas unitarias del anonimizador (datos ficticios)
+documentos.py                 # convierte PDF / Word / imagen escaneada en imágenes limpias para el OCR
+tests/                        # pruebas unitarias (datos ficticios)
 prueba_ocr.py                 # script de prueba con el modelo base (sin fine-tuning)
 prueba_modelo_entrenado.py    # script de prueba con el modelo fine-tuneado
 importar_xfund_es.py          # (opcional) importa datos reales de XFUND-ES — ver nota de licencia abajo
 ARQUITECTURA_Y_LICENCIAS.md   # documentación técnica y de licenciamiento completa
+PROCESAMIENTO_DE_DOCUMENTOS.md  # cómo se convierten PDF / Word / escaneos en imágenes limpias
 ```
 
 > Los pesos del modelo entrenado, el dataset generado y las imágenes de
@@ -64,7 +66,7 @@ ARQUITECTURA_Y_LICENCIAS.md   # documentación técnica y de licenciamiento comp
 ```bash
 # 1. Entorno
 python -m venv .venv
-.venv\Scripts\pip install paddlepaddle-gpu paddleocr paddlex[ocr] fastapi uvicorn python-multipart
+.venv\Scripts\pip install paddlepaddle-gpu paddleocr paddlex[ocr] fastapi uvicorn python-multipart pypdfium2
 
 # 2. Generar dataset sintético
 python generar_dataset.py
@@ -88,12 +90,12 @@ Documentación interactiva en `http://localhost:8000/docs`.
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET | `/health` | Estado del servicio |
-| POST | `/ocr` | Devuelve cada línea reconocida con su caja y confianza |
+| POST | `/ocr` | Devuelve cada línea reconocida con su caja, confianza y página |
 | POST | `/ocr/texto` | Devuelve todo el texto en una sola variable, con anonimización opcional |
 
 ### `POST /ocr/texto`
 
-Parámetros: `file` (imagen, multipart) y `anonimizar` (query, `true` por defecto).
+Parámetros: `file` (imagen, PDF o Word `.docx`; multipart) y `anonimizar` (query, `true` por defecto).
 
 ```bash
 curl -X POST "http://localhost:8000/ocr/texto?anonimizar=true" -F "file=@cv.png"
@@ -109,6 +111,26 @@ curl -X POST "http://localhost:8000/ocr/texto?anonimizar=true" -F "file=@cv.png"
 ```
 
 Con `anonimizar=false` se devuelve el texto original y no aparece `datos_anonimizados`.
+
+### Formatos de entrada
+
+Ambos endpoints aceptan lo que llega de un escáner, y el tipo se detecta por el **contenido** del archivo, no por la extensión:
+
+| Formato | Qué se hace |
+|---|---|
+| Imagen (PNG, JPG, TIFF, BMP, WEBP) | Se usa directamente |
+| PDF | Cada página se convierte en imagen a 200 DPI (hasta 10 páginas) |
+| Word `.docx` | Se extraen las imágenes del documento en orden (se ignoran logos menores de 300 px; hasta 10) |
+
+Antes del OCR, cada imagen se limpia (`documentos.py`): se aplana la transparencia sobre fondo blanco, se corrige la orientación EXIF, se **endereza la hoja si el escáner la dejó inclinada** (hasta ±6°) y se recupera el contraste si está desteñida. En un archivo de varias páginas el nombre del candidato se busca en la primera y se enmascara en todas; la respuesta incluye `paginas` y el texto de cada página va separado por una línea en blanco.
+
+Se rechazan con un mensaje claro (HTTP 400): `.doc` antiguo (guárdalo como `.docx`), PDF con contraseña o dañado, Word sin imágenes (un documento de texto digital, no escaneado), archivos de más de 25 MB y formatos desconocidos. No se corrige una página rotada 90° o 180°.
+
+Detalle del proceso en [`PROCESAMIENTO_DE_DOCUMENTOS.md`](./PROCESAMIENTO_DE_DOCUMENTOS.md).
+
+```bash
+curl -X POST http://localhost:8000/ocr/texto -F "file=@cv_escaneado.pdf"
+```
 
 **Qué se enmascara** (`anonimizador.py`, basado en reglas, sin servicios externos):
 
@@ -126,7 +148,7 @@ La respuesta solo incluye conteos por tipo, nunca los valores originales.
 números de documento, usuarios de redes sociales ni URLs. Es una ayuda, no una
 garantía: revisa el resultado antes de compartirlo.
 
-Pruebas (datos ficticios): `python tests/test_anonimizador.py`
+Pruebas (datos ficticios): `python tests/test_anonimizador.py` y `python tests/test_documentos.py`
 
 ## Nota sobre licenciamiento de datos
 

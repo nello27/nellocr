@@ -5,6 +5,7 @@ Carga el pipeline de PaddleOCR UNA sola vez al arrancar (no por request).
 Endpoints:
   GET  /health      -> estado del servicio
   POST /ocr         -> texto por línea, con caja y confianza
+                       (acepta imagen, PDF o Word .docx escaneado)
   POST /ocr/texto   -> TODO el texto en un solo string, con anonimización
                        opcional de correos, teléfonos, direcciones y del
                        nombre del candidato (no de las empresas)
@@ -18,16 +19,14 @@ Luego:
     curl -X POST "http://localhost:8000/ocr/texto?anonimizar=false" -F "file=@mi_imagen.png"
 """
 
-import io
-
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from paddleocr import PaddleOCR
-from PIL import Image
 import numpy as np
 
-from anonimizador import anonimizar_lineas
+from anonimizador import anonimizar_lineas, nombres_del_candidato
+from documentos import ArchivoNoSoportado, cargar_paginas
 
-app = FastAPI(title="NellOCR API", version="1.1")
+app = FastAPI(title="NellOCR API", version="1.2")
 
 ocr = PaddleOCR(
     text_detection_model_name="PP-OCRv5_mobile_det",
@@ -40,36 +39,38 @@ ocr = PaddleOCR(
 )
 
 
-async def _ocr_por_lineas(file: UploadFile):
-    """Valida la imagen subida y corre el OCR.
+async def _ocr_por_paginas(file: UploadFile):
+    """Convierte el archivo subido (imagen, PDF o Word) a imágenes limpias y corre el OCR.
 
-    Devuelve (lineas, alto_imagen): la lista de líneas con texto, confianza y
-    caja, y el alto en píxeles de la imagen (para ubicar la parte superior).
+    Devuelve una lista con una entrada por página: (lineas, alto_imagen). Cada línea
+    trae texto, confianza y caja; el alto sirve para ubicar la parte superior de la
+    página (donde suele estar el nombre).
     """
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="El archivo debe ser una imagen")
-
     contenido = await file.read()
     try:
-        imagen = Image.open(io.BytesIO(contenido)).convert("RGB")
+        paginas = cargar_paginas(contenido)
+    except ArchivoNoSoportado as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception:
-        raise HTTPException(status_code=400, detail="No se pudo leer la imagen")
+        raise HTTPException(status_code=400, detail="No se pudo leer el archivo")
 
-    resultados = ocr.predict(np.array(imagen))
-
-    lineas = []
-    for resultado in resultados:
-        res = resultado.json["res"] if hasattr(resultado, "json") else resultado
-        textos = res.get("rec_texts", [])
-        scores = res.get("rec_scores", [])
-        cajas = res.get("rec_boxes", [])
-        for texto, score, caja in zip(textos, scores, cajas):
-            lineas.append({
-                "texto": texto,
-                "confianza": round(float(score), 4),
-                "caja": [int(v) for v in caja],
-            })
-    return lineas, imagen.size[1]
+    salida = []
+    for imagen in paginas:
+        resultados = ocr.predict(np.array(imagen))
+        lineas = []
+        for resultado in resultados:
+            res = resultado.json["res"] if hasattr(resultado, "json") else resultado
+            textos = res.get("rec_texts", [])
+            scores = res.get("rec_scores", [])
+            cajas = res.get("rec_boxes", [])
+            for texto, score, caja in zip(textos, scores, cajas):
+                lineas.append({
+                    "texto": texto,
+                    "confianza": round(float(score), 4),
+                    "caja": [int(v) for v in caja],
+                })
+        salida.append((lineas, imagen.size[1]))
+    return salida
 
 
 @app.get("/health")
@@ -79,8 +80,9 @@ def health():
 
 @app.post("/ocr")
 async def extraer_texto(file: UploadFile = File(...)):
-    lineas, _ = await _ocr_por_lineas(file)
-    return {"archivo": file.filename, "lineas": lineas}
+    paginas = await _ocr_por_paginas(file)
+    lineas = [dict(linea, pagina=n) for n, (ls, _) in enumerate(paginas, start=1) for linea in ls]
+    return {"archivo": file.filename, "paginas": len(paginas), "lineas": lineas}
 
 
 @app.post("/ocr/texto")
@@ -94,19 +96,28 @@ async def extraer_texto_unico(
                     "empresas no se enmascaran.",
     ),
 ):
-    lineas, alto_imagen = await _ocr_por_lineas(file)
+    paginas = await _ocr_por_paginas(file)
 
     if not anonimizar:
-        # Todo el texto de la imagen en una sola variable, una línea por renglón.
-        texto_completo = "\n".join(linea["texto"] for linea in lineas)
-        return {"archivo": file.filename, "anonimizado": False, "texto": texto_completo}
+        # Todo el texto del archivo en una sola variable, una línea por renglón.
+        texto_completo = "\n\n".join("\n".join(l["texto"] for l in ls) for ls, _ in paginas)
+        return {"archivo": file.filename, "paginas": len(paginas),
+                "anonimizado": False, "texto": texto_completo}
 
-    # Todo el texto en una sola variable, ya anonimizado.
-    texto_completo, conteo = anonimizar_lineas(lineas, alto_imagen)
+    # El nombre del candidato se busca en la primera página y se enmascara en todas.
+    primera_lineas, primer_alto = paginas[0]
+    nombres = nombres_del_candidato(primera_lineas, primer_alto)
+    textos, conteo = [], {}
+    for n, (lineas, alto) in enumerate(paginas):
+        texto, c = anonimizar_lineas(lineas, alto, nombres=nombres, buscar_nombre=(n == 0))
+        textos.append(texto)
+        for clave, valor in c.items():
+            conteo[clave] = conteo.get(clave, 0) + valor
     # Solo se devuelven cantidades por tipo, nunca los valores originales.
     return {
         "archivo": file.filename,
+        "paginas": len(paginas),
         "anonimizado": True,
-        "texto": texto_completo,
+        "texto": "\n\n".join(textos),
         "datos_anonimizados": conteo,
     }

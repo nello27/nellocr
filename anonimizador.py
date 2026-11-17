@@ -483,18 +483,30 @@ def anonimizar(texto: str, nombres=()):
     return "\n".join(salida), conteo
 
 
-def anonimizar_lineas(lineas, alto_imagen):
+def nombres_del_candidato(lineas, alto_imagen):
+    """Palabras del nombre del candidato (para enmascararlas en otras páginas)."""
+    tokens = []
+    for i in detectar_lineas_nombre(lineas, alto_imagen):
+        tokens.extend(_tokens_de_nombre(lineas[i]["texto"]))
+    return tokens
+
+
+def anonimizar_lineas(lineas, alto_imagen, nombres=(), buscar_nombre=True):
     """Anonimiza el resultado del OCR usando también la geometría de las líneas.
 
     `lineas`: lista de dicts con "texto" y "caja" ([x1, y1, x2, y2]).
     `alto_imagen`: alto en píxeles de la imagen original.
+    `nombres`: palabras de nombre ya conocidas (p. ej. las del candidato, sacadas
+    de la primera página) que se enmascaran también aquí.
+    `buscar_nombre`: False en las páginas 2 en adelante, donde un título grande
+    no debe tomarse por el nombre del candidato.
     Devuelve (texto_anonimizado, conteo), con todo el texto en un solo string.
     """
-    indices = set(detectar_lineas_nombre(lineas, alto_imagen))
+    indices = set(detectar_lineas_nombre(lineas, alto_imagen)) if buscar_nombre else set()
     referencias = {i: tramo for i, tramo in detectar_referencias(lineas).items()
                    if i not in indices}
     correos = detectar_correos_sin_arroba(lineas)
-    textos, tokens = [], []
+    textos, tokens = [], list(nombres)
     for i, linea in enumerate(lineas):
         if i in correos:
             textos.append(EMAIL)

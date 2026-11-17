@@ -106,6 +106,8 @@ el oficial de PaddleOCR sin modificar.
 | [Uvicorn](https://github.com/encode/uvicorn) | Servidor ASGI | BSD-3-Clause | ✅ Sí |
 | [Pillow](https://github.com/python-pillow/Pillow) | Procesamiento de imágenes | MIT-CMU (HPND) | ✅ Sí |
 | [NumPy](https://numpy.org/) | Cómputo numérico | BSD-3-Clause | ✅ Sí |
+| [pypdfium2](https://github.com/pypdfium2-team/pypdfium2) | Convierte las páginas de un PDF en imágenes (motor PDFium) | Apache 2.0 / BSD-3-Clause | ✅ Sí |
+| [OpenCV](https://opencv.org/) | Corrige la inclinación de hojas escaneadas | Apache 2.0 | ✅ Sí |
 | [python-multipart](https://pypi.org/project/python-multipart/) | Subida de archivos en FastAPI | Apache 2.0 | ✅ Sí |
 
 **Todo el software del stack (framework, modelos base, librerías de la API) es
